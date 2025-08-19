@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MaintAlneer - AI-Powered Industrial Monitoring</title>
+
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- React and Babel for in-browser JSX transformation -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons for modern icons -->
+    <script src="https://unpkg.com/lucide-react@0.292.0/dist/lucide-react.js"></script>
+
+    <!-- ML Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.4.0/dist/speech-commands.min.js"></script>
+
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #e6edf3;
+        }
+        #root {
+            position: relative;
+            z-index: 1;
+        }
+        .grid-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 3rem 3rem;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .aurora-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -1;
+        }
+
+        .aurora-background::before {
+            content: '';
+            position: absolute;
+            width: 150%;
+            height: 150%;
+            background-image: radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15), transparent 60%);
+            animation: aurora 20s infinite linear;
+        }
+
+        @keyframes aurora {
+            0% { transform: translate(-25%, -25%) rotate(0deg); }
+            50% { transform: translate(0%, 0%) rotate(180deg); }
+            100% { transform: translate(-25%, -25%) rotate(360deg); }
+        }
+
+        .icon-spin {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.5s ease-out forwards;
+            opacity: 0;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .slide-in-right {
+            animation: slideInRight 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* Styles for the generated report content */
+        .prose h2, .prose h3 {
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 0.3em;
+        }
+        .prose h2 { font-size: 1.25rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .prose h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .prose ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
+        .prose li { margin-bottom: 0.25rem; }
+        .prose p { margin-bottom: 0.75rem; }
+        .prose strong { font-weight: 600; }
+        .prompt-button {
+            cursor: pointer;
+            background-color: #2a303c;
+            border: 1px solid #444c56;
+            padding: 8px 12px;
+            border-radius: 16px;
+            font-size: 0.875rem;
+            transition: background-color 0.2s;
+        }
+        .prompt-button:hover {
+            background-color: #3a404c;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- Configuration ---
+        const TEACHABLE_IMAGE_URL = "https://teachablemachine.withgoogle.com/models/AWuD98equ/";
+        const TEACHABLE_AUDIO_URL = "https://teachablemachine.withgoogle.com/models/lhQ6z685F/";
+
+        // --- Helper Components ---
+        const Icon = ({ name, ...props }) => {
+            if (!window.lucide) return null;
+            return React.createElement(window.lucide[name], props);
+        };
+
+        const ChatbotIcon = () => (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20Z" fill="white"/>
+                <path d="M12 18C14.21 18 16 16.21 16 14H8C8 16.21 9.79 18 12 18Z" fill="white"/>
+                <path d="M9 11C9.55 11 10 10.55 10 10C10 9.45 9.55 9 9 9C8.45 9 8 9.45 8 10C8 10.55 8.45 11 9 11Z" fill="white"/>
+                <path d="M15 11C15.55 11 16 10.55 16 10C16 9.45 15.55 9 15 9C14.45 9 14 9.45 14 10C14 10.55 14.45 11 15 11Z" fill="white"/>
+            </svg>
+        );
+
+        const HazardNotification = ({ hazard, onClose }) => {
+            useEffect(() => {
+                if (hazard) {
+                    const timer = setTimeout(onClose, 7000);
+                    return () => clearTimeout(timer);
+                }
+            }, [hazard, onClose]);
+
+            if (!hazard) return null;
+
+            return (
+                <div className="fixed top-4 right-4 w-full max-w-sm bg-red-900/50 backdrop-blur-lg border border-red-500/50 text-white rounded-xl shadow-2xl z-50 slide-in-right">
+                    <div className="p-4">
+                        <div className="flex items-start">
+                            <div className="flex-shrink-0 pt-0.5"><Icon name="AlertTriangle" className="h-6 w-6 text-red-400" /></div>
+                            <div className="ml-3 w-0 flex-1"><p className="text-base font-bold text-red-300">Audio Hazard Detected!</p><p className="mt-1 text-sm text-slate-200">{hazard.description}</p></div>
+                            <div className="ml-4 flex-shrink-0 flex"><button onClick={onClose} className="inline-flex rounded-md p-1 text-red-200/70 hover:text-white focus:outline-none"><Icon name="X" className="h-5 w-5" /></button></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const StatusBanner = ({ banner, delay }) => {
+            if (!banner.show) return null;
+            const isHazard = banner.type === 'hazard';
+            const bgColor = isHazard ? 'bg-red-500/20' : 'bg-emerald-500/20';
+            const borderColor = isHazard ? 'border-red-500/30' : 'border-emerald-500/30';
+            const iconColor = isHazard ? 'text-red-400' : 'text-emerald-400';
+            const iconName = isHazard ? 'AlertTriangle' : 'ShieldCheck';
+
+            return (
+                <div className={`${bgColor} ${borderColor} backdrop-blur-sm p-4 rounded-xl border fade-in-up flex items-center space-x-4`} style={{ animationDelay: `${delay * 100}ms` }}>
+                    <div className={`p-2 rounded-lg ${bgColor}`}>
+                        <Icon name={iconName} className={iconColor} size={24} />
+                    </div>
+                    <div>
+                        <p className={`font-bold ${isHazard ? 'text-red-300' : 'text-emerald-300'}`}>{isHazard ? 'Hazard Detected' : 'No Hazard Detected'}</p>
+                        <p className="text-sm text-slate-300">{banner.message}</p>
+                    </div>
+                </div>
+            );
+        };
+
+        const StatCard = ({ icon, title, value, iconBgColor, delay }) => (
+            <div className="bg-[#1c1c1c]/50 backdrop-blur-sm p-5 rounded-xl border border-[#2c2c2c] flex items-center space-x-4 transition-all duration-300 hover:bg-[#1c1c1c]/80 hover:border-slate-600 fade-in-up" style={{ animationDelay: `${delay * 100}ms` }}>
+                <div className={`p-3 rounded-lg ${iconBgColor}`}><Icon name={icon} className="text-white" size={24} /></div>
+                <div><p className="text-slate-400 text-sm font-medium">{title}</p><p className="text-white text-2xl font-bold">{value}</p></div>
+            </div>
+        );
+
+        const AudioVisualizer = ({ isListening, results }) => {
+            const bars = useMemo(() => Array(16).fill(0).map((_, i) => {
+                if (!isListening || !results || results.length === 0) return Math.random() * 20 + 5;
+                const prob = results[i % results.length]?.probability || 0;
+                return Math.max(5, prob * 80);
+            }), [isListening, results]);
+
+            return (
+                <div className="flex items-end justify-center h-20 space-x-1.5">
+                    {bars.map((height, i) => <div key={i} className="w-2 bg-gradient-to-t from-emerald-500 to-emerald-300 rounded-full transition-all duration-100" style={{ height: `${height}%` }}></div>)}
+                </div>
+            );
+        };
+
+        const OperatorInfoPanel = ({ info, delay }) => (
+            <div className="bg-[#1c1c1c]/50 backdrop-blur-sm p-4 rounded-xl border border-[#2c2c2c] fade-in-up" style={{ animationDelay: `${delay * 100}ms` }}>
+                <div className="flex justify-between items-center"><div className="flex items-center space-x-4"><Icon name="UserCircle" className="text-slate-400" size={24} /><h2 className="text-lg font-semibold text-white">Operator & Machine Details</h2></div></div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div><p className="text-slate-400">Operator ID</p><p className="text-white font-medium">{info.id}</p></div>
+                    <div><p className="text-slate-400">Machine Name</p><p className="text-white font-medium">{info.machineName}</p></div>
+                    <div><p className="text-slate-400">Last Inspection</p><p className="text-white font-medium">{info.lastInspection}</p></div>
+                </div>
+            </div>
+        );
+
+        const Chatbot = ({ systemHealth, history, isVisible, onClose }) => {
+            const [messages, setMessages] = useState([
+                {
+                    role: 'bot',
+                    text: 'Hello! I am the MaintAlneer AI assistant. How can I help you today? Here are some suggestions:',
+                    prompts: [
+                        'What is the current system health?',
+                        'Summarize the latest activity.',
+                        'Are there any active hazards?',
+                    ]
+                }
+            ]);
+            const [input, setInput] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const messagesEndRef = useRef(null);
+
+            useEffect(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages]);
+
+            const handleSend = async (promptText = null) => {
+                const currentInput = promptText || input;
+                if (!currentInput.trim() || isLoading) return;
+
+                const userMessage = { role: 'user', text: currentInput };
+                setMessages(prev => [...prev.map(m => ({...m, prompts: []})), userMessage]);
+                setInput('');
+                setIsLoading(true);
+
+                const historySummary = history.map(h => `- ${h.title}: ${h.description} (${h.status})`).join('\n');
+                const prompt = `You are an expert AI assistant for the MaintAlneer industrial monitoring system.
+Current System Health: ${systemHealth}%
+Recent Activity Log:
+${historySummary || "No recent activity."}
+
+The user asks: "${currentInput}"
+
+Provide a helpful and concise response.`;
+
+                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+                // Use environment variable for API key on deployed platforms
+                const apiKey = process.env.REACT_APP_GEMINI_API_KEY || "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error("API Error");
+                    const result = await response.json();
+                    const botMessage = { role: 'bot', text: result.candidates[0].content.parts[0].text };
+                    setMessages(prev => [...prev, botMessage]);
+                } catch (error) {
+                    const errorMessage = { role: 'bot', text: "Sorry, I couldn't get a response. Please try again." };
+                    setMessages(prev => [...prev, errorMessage]);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            if (!isVisible) return null;
+
+            return (
+                <div className="fixed bottom-24 right-4 sm:right-6 w-[calc(100%-2rem)] sm:w-full max-w-sm h-[60vh] bg-[#161b22]/80 backdrop-blur-lg rounded-xl border border-slate-700 shadow-2xl flex flex-col z-40 fade-in-up">
+                    <header className="p-4 border-b border-slate-800 flex justify-between items-center flex-shrink-0">
+                        <div className="flex items-center space-x-3">
+                            <ChatbotIcon />
+                            <h2 className="text-lg font-semibold text-white">MaintAlneer AI</h2>
+                        </div>
+                        <button onClick={onClose} className="p-1 rounded-full hover:bg-slate-700 transition-colors"><Icon name="X" className="text-slate-400" /></button>
+                    </header>
+                    <div className="flex-grow p-4 overflow-y-auto">
+                        <div className="space-y-4">
+                            {messages.map((msg, i) => (
+                                <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                    <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-200'}`}>
+                                        <div className="prose prose-sm text-white" dangerouslySetInnerHTML={{ __html: window.marked.parse(msg.text) }}></div>
+                                    </div>
+                                    {msg.prompts && msg.prompts.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                            {msg.prompts.map((prompt, idx) => (
+                                                <button key={idx} onClick={() => handleSend(prompt)} className="prompt-button text-white">
+                                                    {prompt}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                             {isLoading && (
+                                <div className="flex justify-start">
+                                    <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-2xl bg-slate-800 text-slate-200">
+                                        <Icon name="Loader2" className="icon-spin" />
+                                    </div>
+                                </div>
+                            )}
+                            <div ref={messagesEndRef} />
+                        </div>
+                    </div>
+                    <footer className="p-4 border-t border-slate-800 flex-shrink-0">
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="text"
+                                value={input}
+                                onChange={e => setInput(e.target.value)}
+                                onKeyPress={e => e.key === 'Enter' && handleSend()}
+                                placeholder="Ask about the system..."
+                                className="w-full bg-slate-800 text-white placeholder-slate-400 rounded-lg px-4 py-2 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <button onClick={() => handleSend()} disabled={isLoading} className="bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-500 disabled:opacity-50">
+                                <Icon name="Send" size={20} />
+                            </button>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        // --- Main App Component ---
+        const MaintAlneerDashboard = () => {
+            const [currentTime, setCurrentTime] = useState(new Date());
+            const [predictionCount, setPredictionCount] = useState(0);
+            const [systemHealth, setSystemHealth] = useState(99);
+            const [imageModel, setImageModel] = useState(null);
+            const [imageModelStatus, setImageModelStatus] = useState('loading');
+            const [isImageAnalyzing, setIsImageAnalyzing] = useState(false);
+            const [uploadedImage, setUploadedImage] = useState(null);
+            const [imageResults, setImageResults] = useState([]);
+            const [audioRecognizer, setAudioRecognizer] = useState(null);
+            const [audioModelStatus, setAudioModelStatus] = useState('loading');
+            const [isAudioListening, setIsAudioListening] = useState(false);
+            const [audioResults, setAudioResults] = useState([]);
+            const [history, setHistory] = useState([]);
+            const [activeHazard, setActiveHazard] = useState(null);
+            const [statusBanner, setStatusBanner] = useState({ show: false, type: 'normal', message: '' });
+            const [operatorInfo, setOperatorInfo] = useState({ id: 'OP-7892', machineName: 'N/A', lastInspection: 'N/A' });
+            const [isChatbotVisible, setIsChatbotVisible] = useState(false);
+
+            const imageFileInputRef = useRef(null);
+
+            // Effect to initialize models
+            useEffect(() => {
+                const init = async () => {
+                    // Load ML Models
+                    try {
+                        const model = await window.tmImage.load(TEACHABLE_IMAGE_URL + "model.json", TEACHABLE_IMAGE_URL + "metadata.json");
+                        setImageModel(model); setImageModelStatus('ready');
+                    } catch (e) { console.error("Image model failed to load", e); setImageModelStatus('error'); }
+                    try {
+                        const recognizer = window.speechCommands.create("BROWSER_FFT", undefined, TEACHABLE_AUDIO_URL + "model.json", TEACHABLE_AUDIO_URL + "metadata.json");
+                        await recognizer.ensureModelLoaded();
+                        setAudioRecognizer(recognizer); setAudioModelStatus('ready');
+                    } catch (e) { console.error("Audio model failed to load", e); setAudioModelStatus('error'); }
+                };
+                init();
+            }, []);
+
+            // Effect for the clock
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            // Effect to auto-hide the status banner
+            useEffect(() => {
+                if (statusBanner.show) {
+                    const timer = setTimeout(() => {
+                        setStatusBanner(prev => ({ ...prev, show: false }));
+                    }, 7000);
+                    return () => clearTimeout(timer);
+                }
+            }, [statusBanner]);
+
+            const addToHistory = (title, description, status, image) => {
+                const newItem = { id: Date.now(), title, description, status, time: new Date(), icon: title.includes('Equipment') ? 'Camera' : 'Mic', image };
+                setHistory(prev => [newItem, ...prev.slice(0, 4)]);
+                if (status === 'Attention') {
+                    setSystemHealth(h => Math.max(0, h - 5));
+                    if (title === 'Audio Pattern Recognition') {
+                        setActiveHazard(newItem);
+                    }
+                } else {
+                    setSystemHealth(h => Math.min(100, h + 1));
+                }
+            };
+
+            const handleImageUpload = (file) => {
+                if (!file || !imageModel || isImageAnalyzing) return;
+                setIsImageAnalyzing(true);
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const imageDataUrl = e.target.result;
+                    setUploadedImage(imageDataUrl);
+                    const img = new Image();
+                    img.src = imageDataUrl;
+                    img.onload = async () => {
+                        const prediction = await imageModel.predict(img);
+                        const topPred = prediction.reduce((a, b) => a.probability > b.probability ? a : b);
+                        const status = topPred.probability > 0.8 ? 'Normal' : 'Attention';
+
+                        setOperatorInfo(prevInfo => ({
+                            ...prevInfo,
+                            machineName: topPred.className,
+                            lastInspection: new Date().toLocaleDateString('en-CA')
+                        }));
+
+                        setImageResults(prediction);
+                        setPredictionCount(c => c + 1);
+                        addToHistory('Equipment Condition Assessment', `${topPred.className} analysis completed`, status, imageDataUrl);
+                        setIsImageAnalyzing(false);
+                    };
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const toggleAudioMonitoring = async () => {
+                if (isAudioListening) {
+                    if (audioRecognizer && audioRecognizer.isListening()) {
+                        await audioRecognizer.stopListening();
+                    }
+                    setIsAudioListening(false);
+                    setAudioResults([]);
+                } else {
+                    if (!audioRecognizer || audioModelStatus !== 'ready' || !uploadedImage) return;
+                    setIsAudioListening(true);
+                    audioRecognizer.listen(result => {
+                        const scores = Array.from(result.scores);
+                        const classLabels = audioRecognizer.wordLabels();
+                        const results = classLabels.map((label, i) => ({ className: label, probability: scores[i] }));
+                        setAudioResults(results);
+                        const topPred = results.reduce((a, b) => a.probability > b.probability ? a : b);
+
+                        if (topPred.className === 'Normal Operation' || topPred.className === '_background_noise_') {
+                             setStatusBanner({ show: true, type: 'normal', message: 'System sounds are within normal parameters.' });
+                        } else {
+                            if (topPred.probability > 0.90) {
+                                setStatusBanner({ show: true, type: 'hazard', message: `Abnormal sound detected: ${topPred.className}` });
+                                addToHistory('Audio Pattern Recognition', `${topPred.className} sound analysis`, 'Attention', null);
+                                setPredictionCount(c => c + 1);
+                            }
+                        }
+                    }, { 
+                        includeSpectrogram: true,
+                        probabilityThreshold: 0.75,
+                        invokeCallbackOnNoiseAndUnknown: true,
+                        overlapFactor: 0.50
+                    });
+                }
+            };
+
+            const formatTimeAgo = (date) => {
+                const seconds = Math.floor((new Date() - date) / 1000);
+                if (seconds < 60) return `${seconds} seconds ago`;
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return `${minutes} minutes ago`;
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return `${hours} hours ago`;
+                const days = Math.floor(hours / 24);
+                return `${days} days ago`;
+            }
+
+            const activeModelsCount = (imageModelStatus === 'ready' ? 1 : 0) + (audioModelStatus === 'ready' ? 1 : 0);
+
+            return (
+                <>
+                    <div className="aurora-background"></div>
+                    <div className="grid-overlay"></div>
+                    <HazardNotification hazard={activeHazard} onClose={() => setActiveHazard(null)} />
+
+                    <div className="min-h-screen text-slate-200 p-4 sm:p-6 lg:p-8 relative z-10">
+                        <main className="max-w-7xl mx-auto">
+                            <header className="flex flex-col sm:flex-row justify-between sm:items-center mb-8 fade-in-up" style={{animationDelay: '0ms'}}>
+                                <div><h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">MaintAlneer</h1><p className="text-slate-400 text-sm sm:text-base">AI-Powered Industrial Monitoring</p></div>
+                                <div className="flex items-center space-x-4 mt-4 sm:mt-0">
+                                    <div className="text-right">
+                                        <p className="font-semibold text-white text-sm">{currentTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                        <p className="text-slate-400 text-xs">{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
+                                    </div>
+                                    <div className="h-10 w-10 rounded-full bg-emerald-900/50 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
+                                        <Icon name="CheckCircle" size={20} className="text-emerald-400"/>
+                                    </div>
+                                </div>
+                            </header>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                                <StatCard icon="Cpu" title="Active Models" value={activeModelsCount} iconBgColor="bg-blue-500/20" delay={1} />
+                                <StatCard icon="LineChart" title="Predictions Today" value={predictionCount} iconBgColor="bg-emerald-500/20" delay={2} />
+                                <StatCard icon="HeartPulse" title="System Health" value={`${systemHealth}%`} iconBgColor="bg-red-500/20" delay={3} />
+                            </div>
+
+                            <div className="mb-8"><OperatorInfoPanel info={operatorInfo} delay={4} /></div>
+
+                            <div className="mb-8"><StatusBanner banner={statusBanner} delay={5} /></div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
+                                <div className="lg:col-span-3 bg-[#1c1c1c]/50 backdrop-blur-sm p-6 rounded-xl border border-[#2c2c2c] fade-in-up" style={{animationDelay: '600ms'}}>
+                                    <div className="flex items-center space-x-3 mb-4"><Icon name="Camera" className="text-blue-400" size={24}/><div><h2 className="text-lg font-semibold text-white">Visual Equipment Analysis</h2><p className="text-sm text-slate-400">AI-powered image classification</p></div></div>
+                                    <div className="mt-4 border-2 border-dashed border-slate-700 rounded-lg p-6 text-center bg-slate-900/50 cursor-pointer hover:border-blue-500 hover:bg-slate-800/50 transition-colors" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleImageUpload(e.dataTransfer.files[0]); }} onClick={() => imageFileInputRef.current.click()}>
+                                        <input type="file" ref={imageFileInputRef} onChange={e => handleImageUpload(e.target.files[0])} accept="image/*" className="hidden" />
+                                        {uploadedImage ? <img src={uploadedImage} alt="Preview" className="max-h-48 mx-auto rounded-md" /> : <div className="flex flex-col items-center text-slate-400"><Icon name="UploadCloud" size={40} className="mb-2 text-slate-500"/><p className="font-semibold">Drop image here or click to upload</p><p className="text-xs text-slate-500">Max file size: 5MB</p></div>}
+                                    </div>
+                                    <div className="mt-4 min-h-[6rem]">
+                                        {isImageAnalyzing && <div className="flex items-center justify-center text-slate-400"><Icon name="Loader2" className="mr-2 icon-spin"/> Analyzing...</div>}
+                                        {imageResults.length > 0 && !isImageAnalyzing && <div className="space-y-2">{imageResults.map(r => <div key={r.className} className="flex justify-between items-center"><span className="text-slate-300">{r.className}</span><div className="w-1/2 bg-slate-700 rounded-full h-2.5"><div className="bg-blue-500 h-2.5 rounded-full" style={{width: `${r.probability * 100}%`}}></div></div><span className="text-slate-400 w-16 text-right">{(r.probability * 100).toFixed(1)}%</span></div>)}</div>}
+                                    </div>
+                                </div>
+
+                                <div className="lg:col-span-2 bg-[#1c1c1c]/50 backdrop-blur-sm p-6 rounded-xl border border-[#2c2c2c] fade-in-up" style={{animationDelay: '700ms'}}>
+                                    <div className="flex items-center space-x-3 mb-4"><Icon name="Mic" className="text-emerald-400" size={24}/><div><h2 className="text-lg font-semibold text-white">Audio Pattern Recognition</h2><p className="text-sm text-slate-400">Real-time sound analysis</p></div></div>
+                                    <div className="mt-4">
+                                        <button
+                                             onClick={toggleAudioMonitoring}
+                                             disabled={audioModelStatus !== 'ready' || !uploadedImage}
+                                             className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-lg font-semibold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${isAudioListening ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'} shadow-lg`}
+                                        >
+                                            <Icon name={isAudioListening ? 'Square' : 'Play'} size={16} />
+                                            <span>{isAudioListening ? 'Stop Monitoring' : 'Start Monitoring'}</span>
+                                        </button>
+                                        {!uploadedImage && audioModelStatus === 'ready' && (
+                                            <p className="text-xs text-center text-slate-500 mt-2">
+                                                 Please perform a visual analysis first.
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="mt-4 h-24 flex items-center justify-center">{audioModelStatus === 'ready' ? <AudioVisualizer isListening={isAudioListening} results={audioResults} /> : <div className="flex items-center justify-center text-slate-400"><Icon name="Loader2" className="mr-2 icon-spin"/> Loading Model...</div>}</div>
+                                </div>
+                            </div>
+
+                            <div className="bg-[#1c1c1c]/50 backdrop-blur-sm p-6 rounded-xl border border-[#2c2c2c] fade-in-up" style={{animationDelay: '800ms'}}>
+                                <div className="flex justify-between items-center mb-4"><div><h2 className="text-lg font-semibold text-white">Recent Analysis History</h2><p className="text-sm text-slate-400">Track all predictions and system assessments</p></div><a href="#" className="text-sm font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"><span>View All</span><Icon name="ArrowRight" size={16}/></a></div>
+                                <div className="space-y-2">
+                                    {history.length > 0 ? history.map(item => (
+                                        <div key={item.id} className="p-3 bg-slate-900/70 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 transition-all duration-300">
+                                            <div className="flex items-center space-x-4">
+                                                {item.image && <img src={item.image} className="w-12 h-12 rounded-md object-cover flex-shrink-0" />}
+                                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${item.icon === 'Camera' ? 'bg-blue-500/20' : 'bg-emerald-500/20'}`}><Icon name={item.icon} size={20} className={item.icon === 'Camera' ? 'text-blue-400' : 'text-emerald-400'} /></div>
+                                                <div><p className="font-semibold text-white">{item.title}</p><p className="text-sm text-slate-400">{item.description}</p></div>
+                                            </div>
+                                            <div className="text-right w-full sm:w-auto mt-2 sm:mt-0 flex-shrink-0 flex items-center space-x-2 justify-end">
+                                                {item.status === 'Attention' && (
+                                                    <>
+                                                        <button className="text-sm flex items-center space-x-1.5 bg-blue-500/20 text-blue-300 px-3 py-1.5 rounded-md hover:bg-blue-500/40 transition-colors"><Icon name="FileText" size={14}/><span>Report</span></button>
+                                                        <button className="text-sm flex items-center space-x-1.5 bg-purple-500/20 text-purple-300 px-3 py-1.5 rounded-md hover:bg-purple-500/40 transition-colors"><Icon name="Wrench" size={14}/><span>Diagnose</span></button>
+                                                    </>
+                                                )}
+                                                <div className="w-28"><div className={`flex items-center justify-end space-x-2 text-sm font-medium ${item.status === 'Normal' ? 'text-emerald-400' : 'text-yellow-400'}`}><div className={`w-2 h-2 rounded-full ${item.status === 'Normal' ? 'bg-emerald-400' : 'bg-yellow-400'}`}></div><span>{item.status}</span></div><p className="text-sm text-slate-500 mt-1">{formatTimeAgo(item.time)}</p></div>
+                                            </div>
+                                        </div>
+                                    )) : <div className="text-center py-8 text-slate-500">No analysis history yet.</div>}
+                                </div>
+                            </div>
+                        </main>
+                    </div>
+
+                    <div className="fixed bottom-6 right-6 z-40">
+                        <button onClick={() => setIsChatbotVisible(v => !v)} className="bg-blue-600 text-white rounded-full p-3 shadow-lg hover:bg-blue-500 transition-colors flex items-center justify-center w-16 h-16">
+                           {isChatbotVisible ? <Icon name="X" size={32} /> : <ChatbotIcon />}
+                        </button>
+                    </div>
+
+                    <Chatbot
+                        systemHealth={systemHealth}
+                        history={history}
+                        isVisible={isChatbotVisible}
+                        onClose={() => setIsChatbotVisible(false)}
+                    />
+                </>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<MaintAlneerDashboard />);
+    </script>
+</body>
+</html>
